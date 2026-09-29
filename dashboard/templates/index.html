@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NetGuardian • Autonomous Network Security Sentinel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <!-- Navigation Header -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <div>
+        <span class="brand-name">NetGuardian</span>
+      </div>
+      <span class="brand-badge">College Minor Project</span>
+    </div>
+    <div class="nav-actions">
+      <button id="scan-btn" class="btn btn-primary" onclick="triggerScan()">⚡ Scan Subnet Now</button>
+      <button class="btn btn-secondary" onclick="window.location.reload()">🔄 Refresh</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Quick Statistics Grid -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div>
+          <div class="stat-title">Discovered Devices</div>
+          <div id="stat-total-devices" class="stat-value">{{ summary.total_devices }}</div>
+        </div>
+        <div class="stat-icon">💻</div>
+      </div>
+      <div class="stat-card">
+        <div>
+          <div class="stat-title">Active (10m)</div>
+          <div id="stat-active-devices" class="stat-value" style="color: var(--accent-green);">{{ summary.active_devices }}</div>
+        </div>
+        <div class="stat-icon">🟢</div>
+      </div>
+      <div class="stat-card">
+        <div>
+          <div class="stat-title">Packets Captured</div>
+          <div id="stat-total-packets" class="stat-value">{{ "{:,}".format(summary.total_packets) }}</div>
+        </div>
+        <div class="stat-icon">📡</div>
+      </div>
+      <div class="stat-card">
+        <div>
+          <div class="stat-title">Unresolved Anomalies</div>
+          <div id="stat-unresolved-anomalies" class="stat-value" style="color: var(--accent-red);">{{ summary.unresolved_anomalies }}</div>
+        </div>
+        <div class="stat-icon">⚠️</div>
+      </div>
+    </section>
+
+    <!-- Protocol Breakdown Bar -->
+    {% if summary.protocol_breakdown %}
+    <div class="card" style="padding: 14px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <span style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Traffic Mix:</span>
+      {% for p in summary.protocol_breakdown %}
+      <span class="badge badge-proto">{{ p.protocol }}: {{ p.count }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button id="tab-btn-devices" class="tab-btn active" onclick="switchTab('devices')">Network Devices ({{ devices|length }})</button>
+      <button id="tab-btn-anomalies" class="tab-btn" onclick="switchTab('anomalies')">Anomalies & Alerts ({{ anomalies|length }})</button>
+      <button id="tab-btn-traffic" class="tab-btn" onclick="switchTab('traffic')">Live Traffic Metadata</button>
+    </div>
+
+    <!-- Tab 1: Network Devices -->
+    <section id="tab-pane-devices" class="tab-content card">
+      <div class="section-title">
+        <span>Connected Local Hosts</span>
+      </div>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>IP Address</th>
+              <th>MAC Address</th>
+              <th>Hostname</th>
+              <th>Manufacturer (OUI)</th>
+              <th>ML Anomaly Score</th>
+              <th>Schedule</th>
+              <th>Last Seen (UTC)</th>
+              <th>Trust Level</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in devices %}
+            <tr>
+              <td>
+                {% if d.is_trusted %}
+                <span class="badge badge-trusted">Trusted</span>
+                {% else %}
+                <span class="badge badge-untrusted">Untrusted</span>
+                {% endif %}
+              </td>
+              <td class="font-mono"><strong>{{ d.ip_address }}</strong></td>
+              <td class="font-mono text-muted">{{ d.mac_address }}</td>
+              <td>{{ d.hostname or '<span style="color: var(--text-dim);">Unresolved</span>' | safe }}</td>
+              <td>{{ d.vendor or '<span style="color: var(--text-dim);">Unknown Vendor</span>' | safe }}</td>
+              <td>
+                {% if d.anomaly_score < -0.15 %}
+                <span class="score-indicator score-suspicious">{{ "%.3f"|format(d.anomaly_score) }}</span>
+                {% else %}
+                <span class="score-indicator score-normal">{{ "%.3f"|format(d.anomaly_score) }}</span>
+                {% endif %}
+              </td>
+              <td>{{ "%02d:00 - %02d:00"|format(d.active_hours_start, d.active_hours_end) }}</td>
+              <td class="text-muted">{{ d.last_seen }}</td>
+              <td>
+                <button class="trust-toggle-btn {% if d.is_trusted %}trusted{% endif %}" onclick="toggleTrust('{{ d.mac_address }}')">
+                  {% if d.is_trusted %}✓ Trusted (Revoke){% else %}+ Mark Trusted{% endif %}
+                </button>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                No devices recorded yet. Click "Scan Subnet Now" to start discovery.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Tab 2: Anomalies & Alerts -->
+    <section id="tab-pane-anomalies" class="tab-content card" style="display: none;">
+      <div class="section-title">
+        <span>Security Flags & Alerts</span>
+      </div>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Severity</th>
+              <th>Type</th>
+              <th>Device</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in anomalies %}
+            <tr id="anomaly-row-{{ a.id }}">
+              <td class="text-muted">{{ a.timestamp }}</td>
+              <td>
+                {% if a.severity == 'HIGH' %}
+                <span class="badge badge-high">HIGH</span>
+                {% elif a.severity == 'MEDIUM' %}
+                <span class="badge badge-med">MEDIUM</span>
+                {% else %}
+                <span class="badge badge-low">LOW</span>
+                {% endif %}
+              </td>
+              <td><strong>{{ a.anomaly_type }}</strong></td>
+              <td class="font-mono">{{ a.ip_address }}<br><small class="text-muted">{{ a.mac_address }}</small></td>
+              <td>{{ a.description }}</td>
+              <td>
+                {% if a.is_resolved %}
+                <span style="color: var(--accent-green);">Resolved</span>
+                {% else %}
+                <span style="color: var(--accent-red);">Active</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if not a.is_resolved %}
+                <button class="btn btn-secondary resolve-btn" style="padding: 3px 8px; font-size: 11px;" onclick="resolveAnomaly({{ a.id }})">Resolve</button>
+                {% else %}
+                <span class="text-dim">-</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                🎉 No security anomalies flagged. Network status normal.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Tab 3: Live Traffic Metadata -->
+    <section id="tab-pane-traffic" class="tab-content card" style="display: none;">
+      <div class="section-title">
+        <span>Recent Packet Metadata Headers (Zero Payload Inspection)</span>
+      </div>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Protocol</th>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Ports</th>
+              <th>Wire Length</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in recent_traffic %}
+            <tr>
+              <td class="text-muted">{{ t.timestamp }}</td>
+              <td><span class="badge badge-proto">{{ t.protocol }}</span></td>
+              <td class="font-mono">{{ t.src_ip }}<br><small class="text-muted">{{ t.src_mac or '' }}</small></td>
+              <td class="font-mono">{{ t.dst_ip }}<br><small class="text-muted">{{ t.dst_mac or '' }}</small></td>
+              <td class="font-mono">{{ t.src_port or '-' }} &rarr; {{ t.dst_port or '-' }}</td>
+              <td>{{ t.packet_size }} bytes</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                No traffic metadata logged yet.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    NetGuardian • College Minor Project • Free & Open Source Autonomous Network Sentinel
+  </footer>
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
